@@ -256,40 +256,40 @@ docker logs mirrormaker 2>&1 | grep -E \
 
 ## Design Rationale
 
-### Chosen approach: `MirrorSourceTask.java` only
-
-All modifications are confined to a single file — `MirrorSourceTask.java` — with no changes to any other class, interface, or build file in the Kafka codebase. This was a deliberate choice to minimize the diff surface, make the pull request easy to review, and reduce the risk of unintended side effects.
-
-### Task 2: Log Truncation Detection
-
-**Problem:** Kafka's retention policy can purge messages from the source topic before MM2 replicates them. Because MM2's consumer simply resumes from its last committed offset, it has no built-in mechanism to detect that messages between that offset and the current log start offset have been permanently destroyed. The result is a silent gap in the DR replica.
-
-**Solution:** Two detection points were added:
-
-1. **At initialization (`detectLogTruncation`)** — called inside `initializeConsumer()` every time the task starts or restarts. For every partition that has a committed replication offset, `consumer.beginningOffsets()` is called to fetch the broker's current log start offset. If `logStartOffset > lastCommittedOffset + 1`, the intervening messages are gone. A `DataLossException` is thrown immediately so MM2 fails fast with a clear, descriptive error rather than silently producing an incomplete replica.
-
-2. **During polling (`handleRecord`)** — each incoming record's offset is compared against the last seen offset for that partition. A forward jump larger than 1 means records were skipped mid-run. `DataLossException` is thrown again.
-
-**Why fail-fast:** An incomplete DR replica is worse than no replica — it gives false confidence that recovery is possible when it is not. Stopping loudly forces operator awareness and investigation.
-
-**`DataLossException`** is defined as a public static inner class inside `MirrorSourceTask` so all new code stays in one file.
-
-### Task 3: Graceful Topic Reset Handling
-
-**Problem:** When a topic is deleted and recreated, its offsets reset to 0 and Kafka assigns it a new internal topic ID (a UUID). MM2's stored offset from the previous incarnation is now stale. Without handling, MM2 either throws an `OffsetOutOfRangeException` or stalls on an offset that will never arrive.
-
-**Solution:** Two complementary detection mechanisms:
-
-1. **Topic ID comparison (`detectAndHandleTopicReset`)** — called in the `poll()` loop every 5 seconds via `TOPIC_CHECK_INTERVAL_MS`. At initialization, `recordTopicIds()` fetches and stores the Kafka-assigned UUID for each topic via the Admin client. On every subsequent check, `describeTopics()` is called again. If the UUID has changed, the topic was deleted and recreated. MM2 calls `seekToBeginning()` on all affected partitions and updates the stored ID so the check does not re-trigger.
-
-2. **Backward offset detection (`handleRecord`)** — if a consumed record's offset is less than the last seen offset for that topic-partition, this is also a signal of topic reset. MM2 seeks to the beginning and clears the stored state for that partition.
-
-**Why auto-recover:** Unlike data loss, topic reset is a planned maintenance operation. Operators expect MM2 to resume automatically — requiring manual restart would defeat the purpose of a DR pipeline.
-
-### Integration approach
-
-Both features integrate at the `poll()` call site and in `initializeConsumer()`, which are the natural entry points for per-cycle and per-start checks respectively. The existing `commit()`, `commitRecord()`, `stop()`, and `convertRecord()` methods are unchanged. The `consumerAccess` semaphore and `stopping` flag from the original code are respected throughout.
-
+### Extending MirrorMaker 2 rather than building a custom replicator
+ 
+**Problem:** Cross-cluster replication with fault detection is needed, but building a replicator from scratch would require reimplementing offset management, consumer group coordination, partition assignment, and Connect worker lifecycle — all of which MirrorMaker 2 already handles correctly and reliably.
+ 
+**Approach chosen:** Extend the existing MirrorMaker 2 by modifying only `MirrorSourceTask.java`, the single class responsible for consuming from the source cluster and producing to the target.
+ 
+**Why:** MirrorMaker 2 is production-grade, widely used, and deeply integrated with Kafka's Connect framework. Extending it means inheriting all of that reliability for free. Any custom-built replicator would take far longer to reach the same level of correctness. Confining changes to one file also keeps the pull request minimal and reviewable, and means any future Kafka upgrade only requires reconciling changes in one place.
+ 
+---
+ 
+### Task 2: Log Truncation Detection — Fail-Fast approach
+ 
+**Problem:** Kafka's retention policy can silently purge messages from the source topic before MM2 replicates them. MM2 has no built-in awareness of this — it simply resumes from its last committed offset, unaware that the messages it expects to read next no longer exist. The DR replica ends up with a permanent, undetectable gap.
+ 
+**Approach chosen:** Detect the gap and throw an exception immediately — fail-fast — rather than letting replication continue silently.
+ 
+**Why:** The alternative approaches were considered and rejected. Skipping the gap and continuing replication would produce a DR replica that appears complete but is missing events — this is the worst possible outcome because operators would have false confidence in the replica during a disaster recovery scenario. Logging a warning and continuing has the same problem. The only honest response to irreversible data loss is to stop loudly and force an operator decision. A failed MM2 task is visible and alertable; a quietly incomplete replica is not.
+ 
+---
+ 
+### Task 3: Topic Reset — Automatic Recovery approach
+ 
+**Problem:** When a topic is deleted and recreated, its offsets restart from zero. MM2's stored replication offset now points into a topic incarnation that no longer exists. Without handling, MM2 stalls or throws errors and cannot resume replication without a manual restart.
+ 
+**Approach chosen:** Automatically detect the reset and resume replication from the beginning of the new topic incarnation — recover without operator intervention.
+ 
+**Why:** Topic reset is a planned, recoverable maintenance operation — unlike data loss, which is permanent and requires a human decision. Failing fast here would be the wrong choice because the new topic is intact and replicable; there is no reason to stop. Requiring a manual restart every time a topic is recreated would make the DR pipeline fragile and operationally expensive. Auto-recovery is the right tradeoff because it keeps the pipeline running through routine maintenance while still logging the reset event clearly so operators have full visibility into what happened.
+ 
+---
+ 
+### Why offset tracking is the right signal for both scenarios
+ 
+Both truncation and topic reset are detected by comparing expected offsets against actual offsets. This is the most reliable signal available because Kafka's offset model is the authoritative record of what has been consumed and what exists in the log. Topic IDs (UUIDs assigned by Kafka on creation) are used as a secondary signal for topic reset because they change precisely when a topic is deleted and recreated — making them an unambiguous indicator of a new topic incarnation, independent of offset values.
+ 
 ---
 
 ## AI Usage Documentation
