@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'org.apache.kafka.tools'
+version = '1.0.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Kafka clients — matches Kafka 4.0.0
+    implementation 'org.apache.kafka:kafka-clients:4.0.0'
+
+    // SLF4J API + Logback as the runtime logging backend
+    implementation 'org.slf4j:slf4j-api:2.0.12'
+    implementation 'ch.qos.logback:logback-classic:1.5.6'
+}
+
+application {
+    mainClass = 'org.apache.kafka.tools.CommitLogProducer'
+}
+
+// Build a fat JAR (all dependencies bundled) so Docker can run it
+// with a simple: java -jar commit-log-producer.jar
+jar {
+    manifest {
+        attributes(
+            'Main-Class': 'org.apache.kafka.tools.CommitLogProducer'
+        )
+    }
+
+    // Bundle all runtime dependencies into the JAR
+    from {
+        configurations.runtimeClasspath.collect {
+            it.isDirectory() ? it : zipTree(it)
+        }
+    }
+
+    // Avoid duplicate META-INF files from different dependencies
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    archiveFileName = 'commit-log-producer.jar'
+}
+
+// Make the standard 'build' task produce the fat JAR
+build.dependsOn jar

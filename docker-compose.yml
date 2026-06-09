@@ -1,0 +1,154 @@
+services:
+
+  # ═══════════════════════════════════════════════════════════════
+  # Primary Kafka Cluster
+  # Hosts the commit-log topic (source of truth / WAL)
+  # ═══════════════════════════════════════════════════════════════
+  primary-kafka:
+    image: apache/kafka:4.0.0
+    container_name: primary-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@primary-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://primary-kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CLUSTER_ID: "primary-cluster-id-0001"
+      # Log cleaner runs every 5 seconds — required for truncation test
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    ports:
+      - "29092:9092"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "primary-kafka:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - kafka-net
+
+  # ═══════════════════════════════════════════════════════════════
+  # Standby Kafka Cluster (DR)
+  # Hosts primary.commit-log topic (replicated from primary)
+  # ═══════════════════════════════════════════════════════════════
+  standby-kafka:
+    image: apache/kafka:4.0.0
+    container_name: standby-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@standby-kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://standby-kafka:9092,PLAINTEXT_HOST://localhost:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CLUSTER_ID: "standby-cluster-id-0001"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    ports:
+      - "29093:29093"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "standby-kafka:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - kafka-net
+
+  topic-init:
+    image: apache/kafka:4.0.0
+    container_name: topic-init
+    networks:
+    - kafka-net
+    depends_on:
+      primary-kafka:
+        condition: service_healthy
+      standby-kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh \
+        --bootstrap-server primary-kafka:9092 \
+        --create --topic commit-log \
+        --partitions 1 --replication-factor 1 \
+        --config retention.ms=60000 \
+        --config segment.bytes=10240 \
+        --config segment.ms=15000
+
+        /opt/kafka/bin/kafka-topics.sh \
+        --bootstrap-server standby-kafka:9092 \
+        --create --topic primary.commit-log \
+        --partitions 1 --replication-factor 1
+    restart: "no"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Enhanced MirrorMaker 2
+  # Pulls pre-built image from Docker Hub first
+  # Falls back to local build if image not available
+  # ═══════════════════════════════════════════════════════════════
+  mirrormaker:
+    image: bhavna2004/enhanced-mirrormaker2:latest
+    build:
+      context: ../kafka
+      dockerfile: Dockerfile
+    container_name: mirrormaker
+    depends_on:
+      primary-kafka:
+        condition: service_healthy
+      standby-kafka:
+        condition: service_healthy
+    volumes:
+      - ./mm2.properties:/opt/kafka/config/mm2.properties:ro
+    command: >
+      /opt/kafka/bin/connect-mirror-maker.sh
+      /opt/kafka/config/mm2.properties
+    environment:
+      KAFKA_HEAP_OPTS: "-Xmx512M -Xms256M"
+    networks:
+      - kafka-net
+    restart: "no"
+
+  # ═══════════════════════════════════════════════════════════════
+  # Commit Log Producer
+  # Pulls pre-built image from Docker Hub first
+  # Falls back to local build if image not available
+  # ═══════════════════════════════════════════════════════════════
+  producer:
+    image: bhavna2004/commit-log-producer:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: producer
+    depends_on:
+      primary-kafka:
+        condition: service_healthy
+    command:
+      - "--count"
+      - "1000"
+      - "--bootstrap-servers"
+      - "primary-kafka:9092"
+    networks:
+      - kafka-net
+    restart: "no"
+
+networks:
+  kafka-net:
+    driver: bridge

@@ -1,0 +1,84 @@
+<svg width="100%" viewBox="0 0 760 420" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Kafka MirrorMaker 2 Enhanced Data Replication Architecture</title>
+  <desc>High-level architecture showing Commit Log Producer outside the primary cluster, MirrorMaker 2 replicating to Standby Kafka cluster with DR services inside.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- PRODUCER -->
+  <rect x="10" y="152" width="108" height="56" rx="8" stroke-width="0.5" style="fill:rgb(238,237,254);stroke:rgb(83,74,183);"/>
+  <text x="64" y="175" text-anchor="middle" style="fill:rgb(60,52,137);font-size:13px;font-weight:500;font-family:sans-serif;">Commit log</text>
+  <text x="64" y="193" text-anchor="middle" style="fill:rgb(60,52,137);font-size:13px;font-weight:500;font-family:sans-serif;">producer</text>
+
+  <!-- Producer → Primary arrow -->
+  <line x1="118" y1="180" x2="168" y2="180" stroke="#534AB7" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
+  <text x="143" y="172" text-anchor="middle" style="fill:rgb(83,74,183);font-size:10px;font-family:sans-serif;">produce</text>
+
+  <!-- PRIMARY CLUSTER -->
+  <rect x="168" y="60" width="126" height="300" rx="14" stroke-width="0.5" style="fill:rgb(225,245,238);stroke:rgb(15,110,86);fill-opacity:0.08;"/>
+  <text x="231" y="84" text-anchor="middle" style="fill:rgb(8,80,65);font-size:13px;font-weight:500;font-family:sans-serif;">Primary cluster</text>
+  <text x="231" y="99" text-anchor="middle" style="fill:rgb(15,110,86);font-size:11px;font-family:sans-serif;">primary-kafka:9092</text>
+
+  <!-- commit-log topic -->
+  <rect x="184" y="116" width="94" height="52" rx="8" stroke-width="0.5" style="fill:rgb(225,245,238);stroke:rgb(15,110,86);"/>
+  <text x="231" y="138" text-anchor="middle" style="fill:rgb(8,80,65);font-size:13px;font-weight:500;font-family:sans-serif;">commit-log</text>
+  <text x="231" y="155" text-anchor="middle" style="fill:rgb(15,110,86);font-size:11px;font-family:sans-serif;">WAL · 1 partition</text>
+
+  <!-- Primary → MM2 arrow -->
+  <line x1="294" y1="172" x2="354" y2="172" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
+  <text x="324" y="163" text-anchor="middle" style="fill:rgb(15,110,86);font-size:10px;font-family:sans-serif;">replicate</text>
+
+  <!-- MIRRORMAKER 2 -->
+  <rect x="354" y="134" width="150" height="76" rx="8" stroke-width="0.5" style="fill:rgb(250,238,218);stroke:rgb(133,79,11);"/>
+  <text x="429" y="160" text-anchor="middle" style="fill:rgb(99,56,6);font-size:13px;font-weight:500;font-family:sans-serif;">MirrorMaker 2</text>
+  <text x="429" y="177" text-anchor="middle" style="fill:rgb(133,79,11);font-size:11px;font-family:sans-serif;">enhanced replication</text>
+  <text x="429" y="194" text-anchor="middle" style="fill:rgb(133,79,11);font-size:11px;font-family:sans-serif;">fault detection &amp; recovery</text>
+
+  <!-- MM2 → Standby arrow -->
+  <line x1="504" y1="172" x2="564" y2="172" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
+  <text x="534" y="163" text-anchor="middle" style="fill:rgb(15,110,86);font-size:10px;font-family:sans-serif;">replicate</text>
+
+  <!-- STANDBY CLUSTER -->
+  <rect x="564" y="60" width="126" height="300" rx="14" stroke-width="0.5" style="fill:rgb(225,245,238);stroke:rgb(15,110,86);fill-opacity:0.08;"/>
+  <text x="627" y="84" text-anchor="middle" style="fill:rgb(8,80,65);font-size:13px;font-weight:500;font-family:sans-serif;">Standby cluster</text>
+  <text x="627" y="99" text-anchor="middle" style="fill:rgb(15,110,86);font-size:11px;font-family:sans-serif;">standby-kafka:9092</text>
+
+  <!-- primary.commit-log topic inside standby -->
+  <rect x="580" y="116" width="94" height="72" rx="8" stroke-width="0.5" style="fill:rgb(225,245,238);stroke:rgb(15,110,86);"/>
+  <text x="627" y="136" text-anchor="middle" style="fill:rgb(8,80,65);font-size:11px;font-weight:500;font-family:sans-serif;">primary.</text>
+  <text x="627" y="151" text-anchor="middle" style="fill:rgb(8,80,65);font-size:11px;font-weight:500;font-family:sans-serif;">commit-log</text>
+  <text x="627" y="166" text-anchor="middle" style="fill:rgb(15,110,86);font-size:10px;font-family:sans-serif;">DR replica</text>
+  <text x="627" y="180" text-anchor="middle" style="fill:rgb(15,110,86);font-size:10px;font-family:sans-serif;">1 partition</text>
+
+  <!-- DR services inside standby -->
+  <rect x="580" y="218" width="94" height="52" rx="8" stroke-width="0.5" style="fill:rgb(241,239,232);stroke:rgb(95,94,90);"/>
+  <text x="627" y="239" text-anchor="middle" style="fill:rgb(68,68,65);font-size:12px;font-weight:500;font-family:sans-serif;">DR standby</text>
+  <text x="627" y="257" text-anchor="middle" style="fill:rgb(95,94,90);font-size:11px;font-family:sans-serif;">services</text>
+
+  <!-- DR consume arrow inside standby -->
+  <line x1="627" y1="218" x2="627" y2="196" stroke="rgba(31,30,29,0.3)" stroke-width="1" marker-end="url(#arrow)" fill="none"/>
+  <text x="635" y="210" text-anchor="start" style="fill:rgb(95,94,90);font-size:10px;font-family:sans-serif;">consume</text>
+
+  <!-- LEGEND -->
+  <rect x="10" y="374" width="740" height="36" rx="8" fill="none" stroke="rgba(31,30,29,0.15)" stroke-width="0.5" stroke-dasharray="4 3"/>
+
+  <rect x="28" y="384" width="10" height="10" rx="2" style="fill:rgb(225,245,238);stroke:rgb(15,110,86);stroke-width:0.5;"/>
+  <text x="44" y="393" style="fill:rgb(61,61,58);font-size:11px;font-family:sans-serif;">Kafka cluster</text>
+
+  <rect x="148" y="384" width="10" height="10" rx="2" style="fill:rgb(250,238,218);stroke:rgb(133,79,11);stroke-width:0.5;"/>
+  <text x="164" y="393" style="fill:rgb(61,61,58);font-size:11px;font-family:sans-serif;">MirrorMaker 2</text>
+
+  <rect x="278" y="384" width="10" height="10" rx="2" style="fill:rgb(238,237,254);stroke:rgb(83,74,183);stroke-width:0.5;"/>
+  <text x="294" y="393" style="fill:rgb(61,61,58);font-size:11px;font-family:sans-serif;">Producer</text>
+
+  <line x1="368" y1="389" x2="394" y2="389" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
+  <text x="400" y="393" style="fill:rgb(61,61,58);font-size:11px;font-family:sans-serif;">Replication flow</text>
+
+  <line x1="510" y1="389" x2="536" y2="389" stroke="#534AB7" stroke-width="1.5" marker-end="url(#arrow)" fill="none"/>
+  <text x="542" y="393" style="fill:rgb(61,61,58);font-size:11px;font-family:sans-serif;">Produce</text>
+
+  <line x1="606" y1="389" x2="632" y2="389" stroke="rgba(31,30,29,0.3)" stroke-width="1" marker-end="url(#arrow)" fill="none"/>
+  <text x="638" y="393" style="fill:rgb(61,61,58);font-size:11px;font-family:sans-serif;">Consume</text>
+</svg>
